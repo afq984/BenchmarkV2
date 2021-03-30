@@ -5,3 +5,8 @@ out/
 *.iso
 user-data
 meta-data
+
+# gcc 9.1.0
+gcc.tar.zst
+# llvm+clang 8.0.1
+llvm.tar.zst

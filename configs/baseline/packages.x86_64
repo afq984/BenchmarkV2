@@ -1,9 +1,16 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 base
-cloud-init
 linux
 mkinitcpio
-mkinitcpio-archiso
-openssh
 syslinux
+base-devel
+time
+gcc
+clang
+qrencode
+dmidecode
+python
+cmake
+ninja
+tamsyn-font

@@ -1,6 +1,16 @@
-=======
-archiso
-=======
+============
+Benchmark V2
+============
+
+Benchmark build gcc with gcc & build llvm with llvm on an ISO
+
+.. code:: bash
+
+    sudo archiso/mkarchiso -v -w workdir -o outdir configs/baseline
+
+===============
+Original README
+===============
 
 The archiso project features scripts and configuration templates to build installation media (*.iso* images) for BIOS
 and UEFI based systems on the x86_64 architecture.

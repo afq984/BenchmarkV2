@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+
+import re
+import os
+import subprocess
+from collections import OrderedDict
+
+
+def cat(filename):
+    try:
+        with open(filename) as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        return ''
+
+
+def cpuname():
+    o = subprocess.check_output(['lscpu'], universal_newlines=True)
+    for attr in o.splitlines():
+        field, _, data = attr.partition(':')
+        data = data.strip()
+        if 'Model name' == field:
+            data = re.sub(
+                r'\(TM\)|\(R\)',
+                '',
+                data,
+                re.IGNORECASE
+            )
+            data = re.sub(r' {2,}', ' ', data)
+            data = data.replace('CPU ', '')
+            return data
+    return 'Unknown CPU'
+
+
+def cpucores():
+    o = subprocess.check_output(['lscpu', '-p=SOCKET,CORE,CPU'], universal_newlines=True)
+    sockets = set()
+    cores = set()
+    threads = set()
+    for line in o.splitlines():
+        if line.startswith('#'):
+            continue
+        sid, cid, tid = line.split(',')
+        sockets.add(sid)
+        cores.add(cid)
+        threads.add(tid)
+    if len(sockets) == 1:
+        return f'{len(cores)}C{len(threads)}T'
+    return f'{len(sockets)}S{len(cores)}C{len(threads)}T'
+
+
+def cpu():
+    return f'[{cpucores()}] {cpuname()}'
+
+
+mb_long_vensors = {
+    'ASUSTeK COMPUTER INC.'.lower(): 'ASUS',
+}
+
+
+def motherboard():
+    board = '/sys/class/dmi/id/board_'
+    vendor = cat(board + 'vendor').replace(',', '!')
+    vendor = mb_long_vensors.get(vendor.lower(), vendor)
+    name = cat(board + 'name')
+    version = cat(board + 'version')
+    return '{} {} ({})'.format(
+        vendor,
+        name,
+        version,
+    )
+
+
+def hsize(number):
+    for unit in 'KMGT':
+        number /= 1000
+        if number < 1000:
+            break
+    return '{:.3g}{}B'.format(number, unit)
+
+
+def msize(size):
+    if size.endswith(' MB'):
+        size = int(size[:-3])
+    elif size.endswith(' GB'):
+        size = 1024 * int(size[:-3])
+    else:
+        assert False, size
+    for unit in 'MGT':
+        if size < 1024:
+            break
+        size //= 1024
+    return '{}{}B'.format(size, unit)
+
+
+def memory():
+    if os.getuid() != 0:
+        yield 'Memory information requires root'
+        return
+    o = subprocess.check_output(['dmidecode', '-t', '17'], universal_newlines=True)
+    m = []
+    for line in o.splitlines():
+        if line.startswith('Handle '):
+            data = {}
+            m.append(data)
+        elif line.startswith('\t'):
+            k, _, v = line.partition(': ')
+            data[k[1:]] = v.strip()
+    for device in m:
+        if device['Size'] == 'No Module Installed':
+            continue
+        yield ' '.join((
+            msize(device['Size']),
+            # device['Manufacturer'],
+            device['Type'],
+            device['Speed'].replace('MT/s', 'MHz').replace(' ', ''),
+            # device['Part Number'],
+        ))
+
+
+def blockdev():
+    o = subprocess.check_output(('lsblk', '-ndbo', 'size,model'), universal_newlines=True)
+    for dev in o.splitlines():
+        size, model = dev.split(None, 1)
+        yield '{} {}'.format(
+            hsize(int(size)),
+            model.strip(),
+        )
+
+
+def lspci():
+    o = subprocess.check_output(['lspci', '-vmm'], universal_newlines=True)
+    data = {}
+    for l in o.splitlines():
+        if l == '':
+            yield data
+            data = {}
+            continue
+        k, v = l.split(':', 1)
+        data[k] = v.strip()
+
+
+def gpu():
+    for dev in lspci():
+        if dev['Class'] in ('VGA compatible controller', '3D controller'):
+            name = dev['Device']
+            match = re.search(r'\[(.+)\]', name)
+            if match is not None:
+                yield match.group(1)
+            else:
+                yield name
+
+
+def _group_info(values):
+    od = OrderedDict()
+    for value in values:
+        if value not in od:
+            od[value] = 1
+        else:
+            od[value] += 1
+    for value, n in od.items():
+        if n == 1:
+            yield value
+        else:
+            yield '[{}x] {}'.format(n, value)
+
+
+def info_default(name, *values):
+    print('{}:'.format(name))
+    od = _group_info(values)
+    for l in _group_info(values):
+        print('\t' + l)
+
+
+def info_csv(name, *values):
+    print(*_group_info(values), sep='; ', end=',')
+
+
+def macaddress():
+    import glob
+    return sorted(map(cat, glob.glob('/sys/class/net/[ew]*/address')))
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument('--csv', action='store_true')
+    args = parser.parse_args()
+
+    if args.csv:
+        info = info_csv
+    else:
+        info = info_default
+
+    info('ID', *macaddress())
+    info('CPU', cpu())
+    info('Motherboard', motherboard())
+    info('Memory', *memory())
+
+    if args.csv:
+        print()
+
+
+if __name__ == '__main__':
+    main()
